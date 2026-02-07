@@ -53,10 +53,7 @@ bool build_and_run_test(const char *test_name, bool record)
     const char *src_path         = temp_sprintf("%s%s.c", TESTS_FOLDER, test_name);
     const char *test_cwd_path    = temp_sprintf("%s%s%s.cwd", BUILD_FOLDER, TESTS_FOLDER, test_name);
 
-    nob_cc(&cmd);
-    nob_cc_flags(&cmd);
-    nob_cc_output(&cmd, bin_path);
-    nob_cc_inputs(&cmd, src_path);
+    if (!spec(&cmd, .output = bin_path, .inputs = strs(src_path), .default_flags = true)) return_defer(false);
     if (!cmd_run(&cmd)) return_defer(false);
 
     if (file_exists(test_cwd_path)) {

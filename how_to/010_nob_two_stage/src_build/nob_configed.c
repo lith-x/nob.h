@@ -15,11 +15,11 @@ int main(void)
 #endif // BAR
     const char *output_path = BUILD_FOLDER"main";
     const char *input_path = SRC_FOLDER"main.c";
-    nob_cc(&cmd);
-    nob_cc_flags(&cmd);
-    nob_cmd_append(&cmd, "-I"BUILD_FOLDER, "-I.");
-    nob_cc_output(&cmd, output_path);
-    nob_cc_inputs(&cmd, input_path);
+    if (!spec(&cmd,
+        .output = output_path,
+        .inputs = strs(input_path),
+        .default_flags = true,
+        .include_dirs = strs(BUILD_FOLDER, "."))) return 1;
     if (!cmd_run(&cmd)) return 1;
     return 0;
 }

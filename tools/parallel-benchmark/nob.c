@@ -102,10 +102,7 @@ bool average_time_of_several_builds(Config config, double *avg)
 
 bool build_exec(const char *input_path, const char *output_path)
 {
-    nob_cc(&cmd);
-    nob_cc_flags(&cmd);
-    nob_cc_output(&cmd, output_path);
-    nob_cc_inputs(&cmd, input_path);
+    if (!spec(&cmd, .output = output_path, .inputs = strs(input_path), .default_flags = true)) return false;
     return cmd_run(&cmd);
 }
 

@@ -25,10 +25,10 @@ int main(int argc, char **argv)
 
     // Spawn one async process per target collecting them to procs dynamic array
     for (size_t i = 0; i < ARRAY_LEN(targets); ++i) {
-        nob_cc(&cmd);
-        nob_cc_flags(&cmd);
-        nob_cc_output(&cmd, targets[i].bin_path);
-        nob_cc_inputs(&cmd, targets[i].src_path);
+        if (!spec(&cmd,
+            .output = targets[i].bin_path,
+            .inputs = strs(targets[i].src_path),
+            .default_flags = true)) return 1;
         if (!cmd_run(&cmd, .async = &procs)) return 1;
     }
 

@@ -608,6 +608,27 @@ NOBDEF uint64_t nob_nanos_since_unspecified_epoch(void);
 // See https://x.com/vkrajacic/status/1749816169736073295 for more info on how to use such macros.
 #define nob_cmd_run(cmd, ...) nob_cmd_run_opt((cmd), (Nob_Cmd_Opt){__VA_ARGS__})
 
+// NULL-terminated string array literal (e.g. for Nob_Spec .inputs).
+#define nob_strs(...) (const char*[]){ __VA_ARGS__, NULL }
+
+// Compile spec: output, sources, and optional cc, flags, include/lib dirs, libs.
+typedef struct {
+    const char *cc;                   // name of compile command
+    const char *output;               // -o path (required)
+    const char **inputs;              // source paths (required)
+    const char **flags;               // extra flags (after default_flags if set)
+    const char **include_dirs;        // include paths
+    const char **lib_dirs;            // lib search paths
+    const char **libs;                // used to pass raw library filenames that don't conform to typical compiler expectations
+    const char **dynamic_libs;        // dynamic library names, -l:lib[name].so, prefer "libs" when files are known/provided with project
+    const char **static_libs;         // static library names, -l:lib[name].a, prefer "libs" when files are known/provided with project
+    bool default_flags;               // if true, add nob_cc_flags
+} Nob_Spec;
+
+// Build a compile command from a Nob_Spec. Expects empty cmd.
+NOBDEF bool nob_spec_opt(Nob_Cmd *cmd, Nob_Spec spec);
+#define nob_spec(cmd, ...) nob_spec_opt((cmd), (Nob_Spec){__VA_ARGS__})
+
 // DEPRECATED:
 //
 // You were suppose to use this structure like this:
@@ -763,16 +784,14 @@ NOBDEF char *nob_temp_running_executable_path(void);
 // or not use them at all and create your own abstraction on top of Nob_Cmd.
 
 #ifndef nob_cc
-#  if _WIN32
-#    if defined(__GNUC__)
-#       define nob_cc(cmd) nob_cmd_append(cmd, "cc")
-#    elif defined(__clang__)
-#       define nob_cc(cmd) nob_cmd_append(cmd, "clang")
-#    elif defined(_MSC_VER)
-#       define nob_cc(cmd) nob_cmd_append(cmd, "cl.exe")
-#    elif defined(__TINYC__)
-#       define nob_cc(cmd) nob_cmd_append(cmd, "tcc")
-#    endif
+#  if defined(__GNUC__)
+#    define nob_cc(cmd) nob_cmd_append(cmd, "gcc")
+#  elif defined(__clang__)
+#    define nob_cc(cmd) nob_cmd_append(cmd, "clang")
+#  elif defined(_MSC_VER)
+#    define nob_cc(cmd) nob_cmd_append(cmd, "cl.exe")
+#  elif defined(__TINYC__)
+#    define nob_cc(cmd) nob_cmd_append(cmd, "tcc")
 #  else
 #    define nob_cc(cmd) nob_cmd_append(cmd, "cc")
 #  endif
@@ -797,6 +816,46 @@ NOBDEF char *nob_temp_running_executable_path(void);
 #ifndef nob_cc_inputs
 #  define nob_cc_inputs(cmd, ...) nob_cmd_append(cmd, __VA_ARGS__)
 #endif // nob_cc_inputs
+
+#ifndef nob_cc_include_dir
+#  if defined(_MSC_VER) && !defined(__clang__)
+#    define nob_cc_include_dir(cmd, path) nob_cmd_append(cmd, nob_temp_sprintf("/I%s", (path)))
+#  else
+#    define nob_cc_include_dir(cmd, path) nob_cmd_append(cmd, nob_temp_sprintf("-I%s", (path)))
+#  endif
+#endif // nob_cc_include_dir
+
+#ifndef nob_cc_lib_dir
+#  if defined(_MSC_VER) && !defined(__clang__)
+#    define nob_cc_lib_dir(cmd, path) nob_cmd_append(cmd, "/link", nob_temp_sprintf("/libpath:%s", (path)))
+#  else
+#    define nob_cc_lib_dir(cmd, path) nob_cmd_append(cmd, nob_temp_sprintf("-L%s", (path)))
+#  endif
+#endif // nob_cc_lib_dir
+
+#ifndef nob_cc_lib
+#  if defined(_MSC_VER) && !defined(__clang__)
+#    define nob_cc_lib(cmd, lib) nob_cmd_append(cmd, nob_temp_sprintf("%s.lib", (lib)))
+#  else
+#    define nob_cc_lib(cmd, lib) nob_cmd_append(cmd, nob_temp_sprintf("-l:%s", (lib)))
+#  endif
+#endif // nob_cc_lib
+
+#ifndef nob_cc_dynamic_lib
+#  if defined(_MSC_VER) && !defined(__clang__)
+#    define nob_cc_dynamic_lib(cmd, lib) nob_cc_lib(cmd, lib)
+#  else
+#    define nob_cc_dynamic_lib(cmd, lib) nob_cc_lib(cmd, nob_temp_sprintf("lib%s.so", (lib)))
+#  endif
+#endif // nob_cc_dynamic_lib
+
+#ifndef nob_cc_static_lib
+#  if defined(_MSC_VER) && !defined(__clang__)
+#    define nob_cc_static_lib(cmd, lib) nob_cc_lib(cmd, lib)
+#  else
+#    define nob_cc_static_lib(cmd, lib) nob_cc_lib(cmd, nob_temp_sprintf("lib%s.a", (lib)))
+#  endif
+#endif // nob_cc_static_lib
 
 // TODO: add MinGW support for Go Rebuild Urself™ Technology and all the nob_cc_* macros above
 //   Musializer contributors came up with a pretty interesting idea of an optional prefix macro which could be useful for
@@ -1247,6 +1306,48 @@ defer:
     if (opt_fderr) nob_fd_close(*opt_fderr);
     if (!opt.dont_reset) cmd->count = 0;
     return result;
+}
+
+#define NOB__MAP_STRINGS(cmd, strs, operation) \
+    do { \
+        if (strs) \
+            for (const char **p = strs; *p; p++) \
+                operation(cmd, *p); \
+    } while(0)
+
+NOBDEF bool nob_spec_opt(Nob_Cmd *cmd, Nob_Spec spec)
+{
+    if (cmd->count != 0) {
+        nob_log(NOB_ERROR, "nob_spec: reset cmd before passing to nob_spec");
+        return false;
+    }
+    if (!spec.output) {
+        nob_log(NOB_ERROR, "nob_spec: missing required .output argument");
+        return false;
+    }
+    if (spec.inputs == NULL || spec.inputs[0] == NULL) {
+        nob_log(NOB_ERROR, "nob_spec: missing required .inputs argument");
+        return false;
+    }
+
+    if (spec.cc) nob_cmd_append(cmd, spec.cc);
+    else nob_cc(cmd);
+
+    NOB__MAP_STRINGS(cmd, spec.inputs, nob_cmd_append);
+
+    nob_cc_output(cmd, spec.output);
+
+    if (spec.default_flags)
+        nob_cc_flags(cmd);
+
+    NOB__MAP_STRINGS(cmd, spec.include_dirs, nob_cc_include_dir);
+    NOB__MAP_STRINGS(cmd, spec.lib_dirs, nob_cc_lib_dir);
+    NOB__MAP_STRINGS(cmd, spec.flags, nob_cmd_append);
+    NOB__MAP_STRINGS(cmd, spec.libs, nob_cc_lib);
+    NOB__MAP_STRINGS(cmd, spec.dynamic_libs, nob_cc_dynamic_lib);
+    NOB__MAP_STRINGS(cmd, spec.static_libs, nob_cc_static_lib);
+
+    return true;
 }
 
 NOBDEF bool nob_chain_begin_opt(Nob_Chain *chain, Nob_Chain_Begin_Opt opt)
@@ -2857,6 +2958,10 @@ NOBDEF char *nob_temp_running_executable_path(void)
         #define Cmd Nob_Cmd
         #define Cmd_Redirect Nob_Cmd_Redirect
         #define Cmd_Opt Nob_Cmd_Opt
+        #define strs nob_strs
+        #define Spec Nob_Spec
+        #define spec nob_spec
+        #define spec_opt nob_spec_opt
         #define cmd_run_opt nob_cmd_run_opt
         #define cmd_run nob_cmd_run
         #define cmd_render nob_cmd_render

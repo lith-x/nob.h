@@ -58,13 +58,9 @@ int main(int argc, char **argv)
     // nob_cmd_run() automatically resets the cmd array, so you can nob_cmd_append() more strings
     // into it.
 
-    // nob.h ships with a bunch of nob_cc_* macros that try abstract away the specific compiler.
-    // They are verify basic and not particularly flexible, but you can redefine them if you need to
-    // or not use them at all and create your own abstraction on top of Nob_Cmd.
-    nob_cc(&cmd);
-    nob_cc_flags(&cmd);
-    nob_cc_output(&cmd, BUILD_FOLDER "foo");
-    nob_cc_inputs(&cmd, SRC_FOLDER "foo.c");
+    // Another strategy to construct platform-neutral compilation commands is using nob_spec().
+    // nob_strs is a light macro wrapper that creates a null-terminated string array, which is what nob_spec expects.
+    nob_spec(&cmd, .output = BUILD_FOLDER "foo", .inputs = nob_strs(SRC_FOLDER "foo.c"), .default_flags = true);
     if (!nob_cmd_run(&cmd)) return 1;
 
     return 0;

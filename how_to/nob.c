@@ -18,10 +18,7 @@ int main(int argc, char **argv)
         nob_log(INFO, "--- %s ---", example);
         size_t mark = temp_save();
             if (!set_current_dir(temp_sprintf("./%s", example))) return 1;
-                nob_cc(&cmd);
-                nob_cc_flags(&cmd);
-                nob_cc_output(&cmd, "./nob");
-                nob_cc_inputs(&cmd, "nob.c");
+                if (!spec(&cmd, .output = "./nob", .inputs = strs("nob.c"), .default_flags = true)) return 1;
                 if (!cmd_run(&cmd)) return 1;
 
                 cmd_append(&cmd, "./nob");
